@@ -1,19 +1,21 @@
-import { Link, useNavigate } from '@tanstack/react-router'
+'use client'
+
 import { useAuthActions } from '@convex-dev/auth/react'
 import { ChevronDown, Plus, Search } from 'lucide-react'
+import Link from 'next/link'
+import { usePathname, useRouter } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
-import { useMe, useRequireAuth } from '~/lib/hooks'
+import { useMe, useRequireAuth, type Me } from '~/lib/hooks'
 import { useLog } from './LogDialog'
 import { Avatar } from './ui'
 
 export function Logo() {
   return (
-    <Link to="/" className="flex items-center gap-2" aria-label="Crema home">
+    <Link href="/" className="flex items-center gap-2" aria-label="Crema home">
       <svg viewBox="0 0 32 32" className="size-7" aria-hidden>
         <ellipse cx="16" cy="16" rx="11" ry="14" transform="rotate(30 16 16)" fill="#e3a857" />
         <path
           d="M10.5 6.5c5 4 1.5 9.5 5.5 12.5s3.5 6.5 5.5 7"
-          transform="rotate(0 16 16)"
           stroke="#15110e"
           strokeWidth="2.2"
           strokeLinecap="round"
@@ -26,44 +28,56 @@ export function Logo() {
 }
 
 const NAV = [
-  { to: '/beans', label: 'Beans' },
-  { to: '/roasters', label: 'Roasters' },
-  { to: '/lists', label: 'Lists' },
-  { to: '/members', label: 'Members' },
+  { href: '/beans', label: 'Beans' },
+  { href: '/roasters', label: 'Roasters' },
+  { href: '/lists', label: 'Lists' },
+  { href: '/members', label: 'Members' },
 ] as const
+
+function NavLink({ href, children }: { href: string; children: React.ReactNode }) {
+  const pathname = usePathname()
+  const active = pathname === href || pathname.startsWith(`${href}/`)
+  return (
+    <Link
+      href={href}
+      aria-current={active ? 'page' : undefined}
+      className={`text-xs font-semibold uppercase tracking-[0.14em] hover:text-ink ${active ? 'text-ink' : 'text-muted'}`}
+    >
+      {children}
+    </Link>
+  )
+}
 
 export function Header() {
   const me = useMe()
   const { openLog } = useLog()
   const requireAuth = useRequireAuth()
-  const navigate = useNavigate()
+  const router = useRouter()
   const [q, setQ] = useState('')
 
-  const navLink =
-    'text-xs font-semibold uppercase tracking-[0.14em] text-muted hover:text-ink [&.active]:text-ink'
+  const links = (
+    <>
+      {me && <NavLink href="/activity">Activity</NavLink>}
+      {NAV.map((n) => (
+        <NavLink key={n.href} href={n.href}>
+          {n.label}
+        </NavLink>
+      ))}
+    </>
+  )
 
   return (
     <header className="sticky top-0 z-40 border-b border-line bg-bg/90 backdrop-blur">
       <div className="mx-auto flex h-14 max-w-6xl items-center gap-6 px-4">
         <Logo />
-        <nav className="hidden items-center gap-5 md:flex">
-          {me && (
-            <Link to="/activity" className={navLink}>
-              Activity
-            </Link>
-          )}
-          {NAV.map((n) => (
-            <Link key={n.to} to={n.to} className={navLink}>
-              {n.label}
-            </Link>
-          ))}
-        </nav>
+        <nav className="hidden items-center gap-5 md:flex">{links}</nav>
         <div className="ml-auto flex items-center gap-3">
           <form
             className="relative hidden sm:block"
             onSubmit={(e) => {
               e.preventDefault()
-              void navigate({ to: '/beans', search: { q: q.trim() || undefined } })
+              const term = q.trim()
+              router.push(term ? `/beans?q=${encodeURIComponent(term)}` : '/beans')
             }}
           >
             <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-dim" />
@@ -81,29 +95,21 @@ export function Header() {
           >
             <Plus className="size-4" strokeWidth={3} /> Log
           </button>
-          {me === undefined ? (
-            <span className="size-8 animate-pulse rounded-full bg-raised" />
-          ) : me === null ? (
-            <Link to="/signin" className="text-sm font-semibold text-muted hover:text-ink">
+          {me ? (
+            <AccountMenu me={me} />
+          ) : (
+            <Link href="/signin" className="text-sm font-semibold text-muted hover:text-ink">
               Sign in
             </Link>
-          ) : (
-            <AccountMenu me={me} />
           )}
         </div>
       </div>
       <nav className="flex gap-5 overflow-x-auto px-4 pb-2.5 md:hidden">
-        {me && (
-          <Link to="/activity" className={navLink}>
-            Activity
-          </Link>
-        )}
-        {NAV.map((n) => (
-          <Link key={n.to} to={n.to} className={navLink}>
-            {n.label}
-          </Link>
-        ))}
-        <Link to="/beans" search={{ focus: true }} className={`${navLink} sm:hidden`}>
+        {links}
+        <Link
+          href="/beans?focus=1"
+          className="text-xs font-semibold uppercase tracking-[0.14em] text-muted hover:text-ink sm:hidden"
+        >
           Search
         </Link>
       </nav>
@@ -111,11 +117,11 @@ export function Header() {
   )
 }
 
-function AccountMenu({ me }: { me: { username: string; name: string | null; avatarUrl: string | null } }) {
+function AccountMenu({ me }: { me: Me }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   const { signOut } = useAuthActions()
-  const navigate = useNavigate()
+  const router = useRouter()
 
   useEffect(() => {
     if (!open) return
@@ -133,7 +139,7 @@ function AccountMenu({ me }: { me: { username: string; name: string | null; avat
 
   const item = 'block px-4 py-2 text-sm text-muted hover:bg-raised hover:text-ink'
   const close = () => setOpen(false)
-  const params = { username: me.username }
+  const base = `/u/${me.username}`
 
   return (
     <div className="relative" ref={ref}>
@@ -152,32 +158,32 @@ function AccountMenu({ me }: { me: { username: string; name: string | null; avat
           role="menu"
           className="absolute right-0 mt-2 w-48 overflow-hidden rounded-lg border border-line bg-surface py-1 shadow-xl"
         >
-          <p className="truncate border-b border-line px-4 pb-2 pt-1 text-xs text-dim">
-            @{me.username}
-          </p>
-          <Link to="/u/$username" params={params} className={item} onClick={close}>
+          <p className="truncate border-b border-line px-4 pb-2 pt-1 text-xs text-dim">@{me.username}</p>
+          <Link href={base} className={item} onClick={close}>
             Profile
           </Link>
-          <Link to="/u/$username/diary" params={params} className={item} onClick={close}>
+          <Link href={`${base}/diary`} className={item} onClick={close}>
             Diary
           </Link>
-          <Link to="/u/$username/reviews" params={params} className={item} onClick={close}>
+          <Link href={`${base}/reviews`} className={item} onClick={close}>
             Reviews
           </Link>
-          <Link to="/u/$username/wishlist" params={params} className={item} onClick={close}>
+          <Link href={`${base}/wishlist`} className={item} onClick={close}>
             Wishlist
           </Link>
-          <Link to="/u/$username/lists" params={params} className={item} onClick={close}>
+          <Link href={`${base}/lists`} className={item} onClick={close}>
             Lists
           </Link>
-          <Link to="/settings" className={`${item} border-t border-line`} onClick={close}>
+          <Link href="/settings" className={`${item} border-t border-line`} onClick={close}>
             Settings
           </Link>
           <button
             className={`${item} w-full text-left`}
-            onClick={() => {
+            onClick={async () => {
               close()
-              void signOut().then(() => navigate({ to: '/' }))
+              await signOut()
+              router.push('/')
+              router.refresh() // re-render Server Components without the session
             }}
           >
             Sign out

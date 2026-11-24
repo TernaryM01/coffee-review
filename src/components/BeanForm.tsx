@@ -1,3 +1,5 @@
+'use client'
+
 import { useQuery } from 'convex/react'
 import { ImagePlus, X } from 'lucide-react'
 import { useState } from 'react'

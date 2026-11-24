@@ -201,12 +201,14 @@ export const forUser = query({
 export const recent = query({
   args: { limit: v.optional(v.number()) },
   handler: async (ctx, { limit }) => {
-    const lists = await ctx.db
-      .query("lists")
-      .withIndex("by_updatedAt")
-      .order("desc")
-      .filter((q) => q.gt(q.field("beanCount"), 0))
-      .take(Math.min(limit ?? 12, 48));
+    // Skip empty lists, scanning a bounded number of recent ones.
+    const max = Math.min(limit ?? 12, 48);
+    const lists: Doc<"lists">[] = [];
+    const recent = await ctx.db.query("lists").withIndex("by_updatedAt").order("desc").take(max * 5);
+    for (const l of recent) {
+      if (l.beanCount > 0) lists.push(l);
+      if (lists.length >= max) break;
+    }
     const loader = new Loader(ctx);
     return await Promise.all(lists.map((l) => withPreview(loader, l)));
   },

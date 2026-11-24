@@ -1,4 +1,6 @@
-import { Link } from '@tanstack/react-router'
+'use client'
+
+import Link from 'next/link'
 import { useQuery } from 'convex/react'
 import { Search } from 'lucide-react'
 import { useState } from 'react'
@@ -63,7 +65,7 @@ export function BeanPicker({
       </ul>
       <p className="mt-3 border-t border-line pt-3 text-sm text-muted">
         Can't find it?{' '}
-        <Link to="/beans/new" className="font-semibold text-crema hover:underline">
+        <Link href="/beans/new" className="font-semibold text-crema hover:underline">
           Add a bean to Crema
         </Link>
       </p>

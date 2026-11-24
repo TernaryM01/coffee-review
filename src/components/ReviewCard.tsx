@@ -1,4 +1,4 @@
-import { Link } from '@tanstack/react-router'
+import Link from 'next/link'
 import { RotateCcw } from 'lucide-react'
 import type { HydratedLog } from '@convex/lib/hydrate'
 import { formatDate } from '~/lib/format'
@@ -20,8 +20,7 @@ export function ReviewCard({
     <article className="flex gap-4 border-b border-line py-5 last:border-b-0">
       {showBean && (
         <Link
-          to="/beans/$beanId"
-          params={{ beanId: log.bean._id }}
+          href={`/beans/${log.bean._id}`}
           className="w-16 shrink-0 sm:w-20"
           aria-label={log.bean.name}
         >
@@ -32,8 +31,7 @@ export function ReviewCard({
         {showBean && (
           <h3 className="mb-1 leading-tight">
             <Link
-              to="/beans/$beanId"
-              params={{ beanId: log.bean._id }}
+              href={`/beans/${log.bean._id}`}
               className="font-display text-lg font-semibold hover:text-crema"
             >
               {log.bean.name}
@@ -48,8 +46,7 @@ export function ReviewCard({
           {log.liked && <span className="text-cherry" aria-label="Liked">♥</span>}
           {log.rebrew && <RotateCcw className="size-3.5 text-dim" aria-label="Rebrew" />}
           <Link
-            to="/reviews/$logId"
-            params={{ logId: log._id }}
+            href={`/reviews/${log._id}`}
             className="text-xs text-dim hover:text-ink"
           >
             {log.method ? `${log.method} · ` : ''}
@@ -63,8 +60,7 @@ export function ReviewCard({
         )}
         {clamp && log.review && log.review.length > 320 && (
           <Link
-            to="/reviews/$logId"
-            params={{ logId: log._id }}
+            href={`/reviews/${log._id}`}
             className="mt-1 inline-block text-xs font-semibold text-crema hover:underline"
           >
             Read more

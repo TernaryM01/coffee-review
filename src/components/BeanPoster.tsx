@@ -1,4 +1,4 @@
-import { Link } from '@tanstack/react-router'
+import Link from 'next/link'
 import { ROAST_LEVELS } from '@convex/lib/constants'
 import type { BeanCard } from '@convex/lib/hydrate'
 import { hash, stars } from '~/lib/format'
@@ -119,8 +119,7 @@ export function BeanTile({
   return (
     <div className="group min-w-0">
       <Link
-        to="/beans/$beanId"
-        params={{ beanId: bean._id }}
+        href={`/beans/${bean._id}`}
         className="block rounded-md transition group-hover:ring-2 group-hover:ring-crema"
         title={`${bean.name} — ${bean.roasterName}`}
       >

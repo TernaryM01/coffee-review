@@ -17,6 +17,9 @@
  *                  Vite dev server can take >30 s for the first page)
  *   --eval <js>    expression evaluated in each page after hydration; result is printed
  *
+ * A 404 page logs "Failed to load resource: … 404": that is the page's own
+ * status, not a broken asset.
+ *
  * Example:
  *   MSYS_NO_PATHCONV=1 bun scripts/shoot.ts home=/ beans=/beans phone=/beans@390
  */
@@ -45,8 +48,13 @@ mkdirSync(outDir, { recursive: true })
 
 const EDGE =
   process.env.BROWSER ?? 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'
-const DEBUG_PORT = 9333
+// A random port, checked to be free: if another browser already listens on
+// it, we'd silently drive that browser (with its cookies) instead of ours.
+const DEBUG_PORT = 9400 + Math.floor(Math.random() * 500)
 const DEVTOOLS = `http://127.0.0.1:${DEBUG_PORT}`
+if (await fetch(`${DEVTOOLS}/json/version`).then(() => true, () => false)) {
+  throw new Error(`Port ${DEBUG_PORT} is already in use by another DevTools browser; run again.`)
+}
 // A fresh profile per run keeps this away from any Edge window the user has
 // open, and means no leftover localStorage (i.e. no stale signed-in session).
 const profile = join(tmpdir(), `crema-cdp-profile-${Date.now()}`)
@@ -94,7 +102,12 @@ async function connect(url: string, onEvent: (method: string, params: any) => vo
   return { send, close: () => ws.close() }
 }
 
-const HYDRATED = `(() => { const h = document.querySelector('header'); return !!h && Object.keys(h).some(k => k.startsWith('__react')) })()`
+// Next.js hydrates client components as their code arrives, so the header can
+// be interactive while a form in <main> isn't yet. Wait for all of them.
+const HYDRATED = `(() => {
+  const els = [...document.querySelectorAll('header, main a, main button, main form, main input')]
+  return els.length > 0 && els.every((el) => Object.keys(el).some((k) => k.startsWith('__react')))
+})()`
 
 async function shoot(name: string, path: string, width: number) {
   const target = (await (await fetch(`${DEVTOOLS}/json/new?about:blank`, { method: 'PUT' })).json()) as any

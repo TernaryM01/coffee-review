@@ -13,15 +13,23 @@ async function findFollow(ctx: QueryCtx, followerId: Id<"users">, followeeId: Id
     .unique();
 }
 
+export type FollowStatus = { signedIn: boolean; self: boolean; following: boolean };
+
+/** Whether `viewer` follows `userId`. Lists include it so follow buttons render on the server. */
+export async function followStatus(
+  ctx: QueryCtx,
+  viewer: Id<"users"> | null,
+  userId: Id<"users">,
+): Promise<FollowStatus> {
+  if (viewer === null) return { signedIn: false, self: false, following: false };
+  if (viewer === userId) return { signedIn: true, self: true, following: false };
+  return { signedIn: true, self: false, following: (await findFollow(ctx, viewer, userId)) !== null };
+}
+
 /** Whether the viewer follows this user. */
 export const status = query({
   args: { userId: v.id("users") },
-  handler: async (ctx, { userId }) => {
-    const viewer = await optionalUserId(ctx);
-    if (viewer === null) return { signedIn: false, self: false, following: false };
-    if (viewer === userId) return { signedIn: true, self: true, following: false };
-    return { signedIn: true, self: false, following: (await findFollow(ctx, viewer, userId)) !== null };
-  },
+  handler: async (ctx, { userId }) => followStatus(ctx, await optionalUserId(ctx), userId),
 });
 
 export const setFollowing = mutation({
@@ -71,8 +79,16 @@ export const network = query({
         .take(200),
     ]);
     const loader = new Loader(ctx);
+    const viewer = await optionalUserId(ctx);
     const load = async (ids: Id<"users">[]) =>
-      (await Promise.all(ids.map((id) => loader.profile(id)))).filter((p) => p !== null);
+      (
+        await Promise.all(
+          ids.map(async (id) => {
+            const profile = await loader.profile(id);
+            return profile && { ...profile, followStatus: await followStatus(ctx, viewer, id) };
+          }),
+        )
+      ).filter((p) => p !== null);
     return {
       following: await load(following.map((f) => f.followeeId)),
       followers: await load(followers.map((f) => f.followerId)),

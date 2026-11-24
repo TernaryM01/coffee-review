@@ -115,11 +115,12 @@ export default defineSchema({
     rebrew: v.boolean(),
     recipe: v.optional(recipe),
   })
+    // Ordered by creation time (the activity feed); by_user_and_brewedOn orders by brew date.
+    // eslint-disable-next-line @convex-dev/no-duplicate-indexes
     .index("by_user", ["userId"])
     .index("by_user_and_brewedOn", ["userId", "brewedOn"])
     .index("by_user_and_hasReview", ["userId", "hasReview"])
     .index("by_user_and_bean_and_brewedOn", ["userId", "beanId", "brewedOn"])
-    .index("by_bean", ["beanId"])
     .index("by_bean_and_hasReview", ["beanId", "hasReview"])
     .index("by_hasReview", ["hasReview"]),
 

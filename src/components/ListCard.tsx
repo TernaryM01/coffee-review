@@ -1,4 +1,4 @@
-import { Link } from '@tanstack/react-router'
+import Link from 'next/link'
 import type { Id } from '@convex/_generated/dataModel'
 import type { BeanCard, Profile } from '@convex/lib/hydrate'
 import { plural } from '~/lib/format'
@@ -40,8 +40,7 @@ export function PosterStack({ beans, size = 'md' }: { beans: BeanCard[]; size?: 
 export function ListCard({ list, compact = false }: { list: ListSummary; compact?: boolean }) {
   return (
     <Link
-      to="/lists/$listId"
-      params={{ listId: list._id }}
+      href={`/lists/${list._id}`}
       className="group block"
     >
       <PosterStack beans={list.preview} size={compact ? 'sm' : 'md'} />

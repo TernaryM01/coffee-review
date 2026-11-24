@@ -1,4 +1,6 @@
-import { Link } from '@tanstack/react-router'
+'use client'
+
+import Link from 'next/link'
 import { X } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 import { hash } from '~/lib/format'
@@ -65,8 +67,7 @@ export function UserLink({
 }) {
   return (
     <Link
-      to="/u/$username"
-      params={{ username: user.username }}
+      href={`/u/${user.username}`}
       className={`font-semibold text-ink hover:text-crema ${className}`}
     >
       {user.name ?? user.username}

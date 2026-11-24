@@ -1,6 +1,8 @@
+'use client'
+
 import { useMutation, useQuery } from 'convex/react'
 import { Heart, RotateCcw } from 'lucide-react'
-import { createContext, useCallback, useContext, useEffect, useState } from 'react'
+import { createContext, useCallback, useContext, useState } from 'react'
 import { api } from '@convex/_generated/api'
 import type { Doc } from '@convex/_generated/dataModel'
 import { BREW_METHODS, FLAVOR_SUGGESTIONS, LIMITS } from '@convex/lib/constants'
@@ -72,15 +74,15 @@ function LogForm({ initial, onDone }: { initial: OpenArgs; onDone: () => void })
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
-  // Prefill from the viewer's existing state for this bean, once it loads.
+  // Prefill from the viewer's existing state for this bean, once it loads
+  // (a setState during render, which React allows for derived state).
   const [prefilled, setPrefilled] = useState(false)
-  useEffect(() => {
-    if (prefilled || editing || !mine) return
+  if (!prefilled && !editing && mine) {
     setPrefilled(true)
     if (mine.rating !== null) setRating(mine.rating)
     if (mine.liked) setLiked(true)
     if (mine.brewCount > 0) setRebrew(true)
-  }, [mine, prefilled, editing])
+  }
 
   const create = useMutation(api.logs.create)
   const update = useMutation(api.logs.update)

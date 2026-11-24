@@ -1,42 +1,54 @@
-import { useConvexAuth, useMutation, useQuery } from 'convex/react'
-import { useLocation, useNavigate } from '@tanstack/react-router'
-import { useCallback, useEffect, useRef, useState } from 'react'
+'use client'
+
+import { useConvexAuth, useMutation, usePreloadedQuery, type Preloaded } from 'convex/react'
+import type { FunctionReference, FunctionReturnType } from 'convex/server'
+import { useRouter } from 'next/navigation'
+import { createContext, useCallback, useContext, useEffect, useState } from 'react'
 import { api } from '@convex/_generated/api'
 import type { Id } from '@convex/_generated/dataModel'
 
-/** The signed-in user. `undefined` while loading, `null` when signed out. */
-export function useMe() {
-  const { isLoading, isAuthenticated } = useConvexAuth()
-  const me = useQuery(api.users.me, isAuthenticated ? {} : 'skip')
-  const result = isLoading ? undefined : !isAuthenticated ? null : me
-  // Auth briefly reports "loading" again when it refreshes or adopts a new
-  // session. Keep showing the last known user through that blip so pages
-  // (and half-filled forms) don't unmount and remount.
-  const last = useRef<typeof result>(undefined)
-  if (result !== undefined) last.current = result
-  return result === undefined ? last.current : result
+/**
+ * `usePreloadedQuery` that keeps the server's value while the client's auth
+ * handshake is in progress, so viewer-specific data rendered signed-in on the
+ * server doesn't flash its signed-out version during hydration.
+ */
+export function usePreloaded<Q extends FunctionReference<'query'>>(preloaded: Preloaded<Q>) {
+  const live = usePreloadedQuery(preloaded)
+  const { isLoading } = useConvexAuth()
+  // Remember the last value seen while auth was settled ("storing information
+  // from previous renders": a setState during render that React allows).
+  const [settled, setSettled] = useState(live)
+  if (!isLoading && settled !== live) setSettled(live)
+  return isLoading ? settled : live
+}
+
+export type Me = NonNullable<FunctionReturnType<typeof api.users.me>>
+
+export const MeContext = createContext<Me | null>(null)
+
+/** The signed-in user, or null. Known on the server, so never "loading". */
+export function useMe(): Me | null {
+  return useContext(MeContext)
 }
 
 /**
- * Wraps an action so signed-out visitors get sent to the sign-in page
- * (and back here afterwards) instead.
+ * Wraps an action so signed-out visitors get sent to the sign-in page (and
+ * back here afterwards) instead.
  */
 export function useRequireAuth() {
-  const { isLoading, isAuthenticated } = useConvexAuth()
-  const navigate = useNavigate()
-  const location = useLocation()
+  const me = useMe()
+  const router = useRouter()
   return useCallback(
     <A extends unknown[]>(fn: (...args: A) => void) =>
       (...args: A) => {
-        // Still restoring the session: don't bounce a signed-in user to /signin.
-        if (isLoading) return
-        if (!isAuthenticated) {
-          void navigate({ to: '/signin', search: { redirect: location.href } })
+        if (!me) {
+          const here = window.location.pathname + window.location.search
+          router.push(`/signin?redirect=${encodeURIComponent(here)}`)
           return
         }
         fn(...args)
       },
-    [isLoading, isAuthenticated, navigate, location.href],
+    [me, router],
   )
 }
 

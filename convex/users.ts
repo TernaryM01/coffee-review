@@ -6,6 +6,7 @@ import { getUserIdByUsername, Loader, toProfile } from "./lib/hydrate";
 import { emptyStats } from "./lib/userBeanState";
 import { cleanText } from "./lib/validate";
 import { assertImage } from "./files";
+import { followStatus } from "./follows";
 
 /** Called by Convex Auth when a new account signs up. */
 export const createUser = internalMutation({
@@ -66,8 +67,13 @@ export const popular = query({
   args: {},
   handler: async (ctx) => {
     const users = await ctx.db.query("users").withIndex("by_followers").order("desc").take(12);
+    const viewer = await optionalUserId(ctx);
     return await Promise.all(
-      users.map(async (u) => ({ ...(await toProfile(ctx, u)), stats: u.stats })),
+      users.map(async (u) => ({
+        ...(await toProfile(ctx, u)),
+        stats: u.stats,
+        followStatus: await followStatus(ctx, viewer, u._id),
+      })),
     );
   },
 });

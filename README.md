@@ -54,36 +54,39 @@ beans."*
 
 | Layer | Choice |
 | --- | --- |
-| Web framework | [TanStack Start](https://tanstack.com/start) (React 19, file-based routing with TanStack Router, SSR) |
+| Web framework | [Next.js](https://nextjs.org) 16 (App Router, Server Components, Turbopack) |
 | Backend & database | [Convex](https://convex.dev): queries, mutations, file storage, full-text search, realtime |
-| Auth | [Convex Auth](https://docs.convex.dev/auth/convex-auth/) (component API), username + passkey method |
-| Data fetching | `@convex-dev/react-query` + TanStack Query for server-rendered data; `convex/react` hooks for live, per-user data |
-| Styling | Tailwind CSS v4, Fraunces + Inter (Google Fonts), lucide-react icons |
-| Server build | Nitro (Bun preset locally, Vercel preset on Vercel) |
+| Auth | [Convex Auth](https://docs.convex.dev/auth/convex-auth/) (component API), username + passkey, with its Next.js SSR integration (httpOnly cookies) |
+| Data fetching | `convex/nextjs` (`preloadQuery`, `fetchQuery`) in Server Components → `usePreloadedQuery` / `usePaginatedQuery` live in the browser |
+| Styling | Tailwind CSS v4, Fraunces + Inter via `next/font`, lucide-react icons |
 | Hosting | Vercel (site) + Convex Cloud (backend) |
-| Runtime & tooling | Bun (package manager, scripts, tests), TypeScript (strict) |
+| Runtime & tooling | Bun (package manager, scripts, tests), TypeScript 5 (strict), ESLint (`eslint-config-next` + Convex plugin) |
 | Tests | `bun test` + [`convex-test`](https://docs.convex.dev/testing/convex-test) |
 
 ## Getting started
 
 ```sh
 bun install
-bun run dev        # Convex + Vite on http://localhost:3000
+bun run dev        # Convex + Next.js on http://localhost:3000
 bun run seed       # optional: 5 roasters and 12 sample beans (skipped if beans exist)
 ```
 
 The first `bun run dev` asks you to log in to Convex and create a project, and writes
-`VITE_CONVEX_URL` to `.env.local`. Passkeys work on `http://localhost:3000` without
-any configuration.
+`NEXT_PUBLIC_CONVEX_URL` to `.env.local`. Passkeys work on `http://localhost:3000`
+without any configuration.
 
 | Script | What it does |
 | --- | --- |
-| `bun run dev` | Convex dev deployment + Vite dev server |
+| `bun run dev` | Convex dev deployment + `next dev` |
 | `bun run seed` | Sample catalog (`convex/seed.ts`) |
 | `bun run test` | Backend tests in `convex/*.test.ts` |
 | `bun run typecheck` | Strict `tsc` over the app and the Convex functions |
-| `bun run build` | Typecheck, then production build into `.output/` |
-| `bun run start` | Serve the production build locally |
+| `bun run lint` | ESLint |
+| `bun run build` | Production build (`next build`, which also typechecks) |
+| `bun run start` | Serve the production build on port 3000 |
+
+There's no Node on the original dev machine: Bun runs everything, including
+`next`, `tsc`, and `eslint`.
 
 AI coding agents: read [AGENTS.md](AGENTS.md). It explains how to run the app
 without a Convex account, take screenshots, and test passkey sign-in headlessly on this setup.
@@ -103,8 +106,8 @@ Set these **before anyone signs up**. A passkey is bound to its domain, so chang
 key* (Settings → Deploy keys).
 
 **2. Vercel.** Import the project and add the environment variable `CONVEX_DEPLOY_KEY`.
-`vercel.json` already sets the commands: `bun install`, then
-`bunx convex deploy --cmd 'bun run build' --cmd-url-env-var-name VITE_CONVEX_URL`,
+`vercel.json` already sets the framework and commands: `bun install`, then
+`bunx convex deploy --cmd 'bun run build' --cmd-url-env-var-name NEXT_PUBLIC_CONVEX_URL`,
 which deploys the Convex functions and builds the site against the production URL.
 
 Optionally seed production once: `bunx convex run seed:catalog --prod`.
@@ -140,24 +143,46 @@ aggregates and the user's stats **in the same transaction**, so the counts can't
 `convex/aggregates.test.ts` covers these rules and checks that the histogram always
 matches the rating count.
 
+### Where the code runs
+
+Convex **is** the backend: every read and write is a Convex query or mutation in
+`convex/`, with its own auth checks. Next.js renders pages and handles the session
+cookies; it has no API routes of its own apart from Convex Auth's.
+
+A request for, say, `/beans/<id>` goes like this:
+
+1. **`src/proxy.ts`** (Next's middleware) refreshes the session if it's about to
+   expire, and redirects: signed-out visitors away from protected pages
+   (`/settings`, `/activity`, `/beans/new`, `/lists/new`, bean edit) to
+   `/signin?redirect=…`, and signed-in visitors away from `/signin`.
+2. The page's **Server Component** reads the access token from the auth cookie and
+   calls Convex **as that user** (`preloadQuery(…, { token })`, helpers in
+   `src/lib/server.ts`). Missing data → `notFound()` → a real **404**.
+3. The server renders the full page, **signed-in**: the account menu, your rating,
+   "Your brews", friends' ratings. The first page of every paginated list is fetched
+   with `firstPage()` and rendered too.
+4. In the browser, each page's client component (`*View.tsx`) hydrates and turns the
+   preloaded data into **live subscriptions** (`usePreloaded`, `src/lib/hooks.ts`).
+   Paginated lists switch from the server's first page to a live `usePaginatedQuery`
+   (`usePaginatedWithInitial`, `src/lib/paginated.ts`).
+
+`usePreloaded` keeps the server's value while the browser's Convex client finishes
+authenticating, so signed-in data doesn't flash its signed-out version. The signed-in
+user is preloaded once in the root layout and shared through `useMe()`.
+
 ### Auth
 
-`convex/auth.ts` sets up Convex Auth and the username + passkey method.
-`users.createUser` runs on sign-up and creates the profile row. Server code reads the
-signed-in user with `getAuthUserId(ctx)` (`convex/lib/auth.ts`), and never trusts a user
-id from the client. Profiles are looked up by username through the auth username
-component (case-insensitive). On the client, `ConvexAuthProvider` wraps the app in
-`src/router.tsx`, and `useMe()` (`src/lib/hooks.ts`) returns the signed-in user.
+`convex/auth.ts` sets up Convex Auth and the username + passkey method;
+`users.createUser` creates the profile row on sign-up. On the web side:
 
-### Loading data
-
-- **Public data** (bean pages, profiles, lists, home page sections) is loaded in route
-  `loader`s with `convexQuery` and rendered on the server. After hydration the same
-  queries become live subscriptions.
-- **Viewer-specific data** (your rating for a bean, follow state, your lists, the
-  activity feed) and **paginated lists** load on the client with `convex/react`. Auth
-  tokens live in the browser, so the server render is always signed-out; these parts
-  fill in after hydration.
+- `src/lib/serverAuth.ts` + `src/app/auth/{signin,refresh,signout}/route.ts`: route
+  handlers that proxy sign-in calls to Convex and keep the refresh token in an
+  **httpOnly cookie**. Only the functions listed in `signIn` (the passkey "finish"
+  steps) can create a session through them.
+- `src/lib/convexAuth.tsx`: the proxy builder, the Server Component token reader, and
+  `ConvexAuthNextjsServerProvider`, which wraps the app in `src/app/layout.tsx`.
+- Server code in `convex/` reads the user with `getAuthUserId(ctx)` and never trusts a
+  user id from the client.
 
 ### Files and images
 
@@ -178,10 +203,13 @@ convex/
   lists.ts follows.ts users.ts files.ts seed.ts
   lib/                      constants (shared with the UI), validation, hydration, userBeanState
 src/
-  router.tsx                router + Convex/React Query + auth provider
-  routes/                   pages (file-based routes)
+  proxy.ts                  session refresh + auth redirects
+  app/                      routes: page.tsx (server) + *View.tsx (client) per page
+    layout.tsx providers.tsx  root layout, preloaded viewer, providers
+    auth/                   Convex Auth route handlers
   components/               BeanPoster, LogDialog, BeanForm, Rating, ReviewCard, …
-  lib/                      formatting, hooks (useMe, useRequireAuth, uploads)
+  lib/                      server.ts (preload helpers), hooks.ts, paginated.ts,
+                            convexAuth.tsx, serverAuth.ts, pageSizes.ts, format.ts
 scripts/shoot.ts            headless screenshot/console-error helper (see AGENTS.md)
 ```
 
@@ -225,23 +253,28 @@ scripts/shoot.ts            headless screenshot/console-error helper (see AGENTS
 - Counters (user stats, bean aggregates) are stored on single documents, which is
   fine until many people write to the same bean at once.
 
+**Rendering**
+- Every page is rendered per request (it reads the auth cookie), so nothing is
+  statically cached. That's fine at this size; caching public pages for signed-out
+  visitors would be the next step if traffic grows.
+- Each search keystroke (debounced) and filter change on `/beans` is a round trip to the
+  server, because the URL is the state and the server renders the results.
+- Paginated lists render their first page on the server; "Load more" works once the
+  live query has taken over, a moment after hydration.
+
 **UI**
-- Missing beans, users, and lists show a "not found" page but return HTTP 200, not 404.
 - List items can hold a note in the database, but the UI doesn't show or edit notes
   yet. Passkeys can be renamed in the backend, but not in the UI.
 - Lists can be reordered only with up/down buttons, and hold at most 250 beans.
-- The server render is always signed-out, so personal bits (your rating, the account
-  menu) appear a moment after the page loads.
 - Brew dates are plain calendar dates (`YYYY-MM-DD`) in the user's own time zone.
 
 **Tooling**
-- ESLint crashes with the template's TypeScript setup; `bun run typecheck` is the
-  source of truth.
+- `next dev` adds a Next.js block to `AGENTS.md` (and re-adds it if removed). It's meant
+  to be committed.
 - Vitest doesn't run under Bun here, so backend tests use `bun test`.
 
 ## TODO: next up
 
-- [ ] Return real 404s (`throw notFound()` in route loaders).
 - [ ] Weighted rating sort (Bayesian average) and a "trending this week" section.
 - [ ] Likes and comments on reviews, plus notifications for follows, likes, and comments.
 - [ ] Moderation: admin role, report a bean or review, merge duplicate beans, edit roasters.
@@ -251,5 +284,5 @@ scripts/shoot.ts            headless screenshot/console-error helper (see AGENTS
 - [ ] Member search; account settings for changing username and deleting an account.
 - [ ] "Year in coffee" stats page: brews per month, top origins, processes, and roasters, rating spread.
 - [ ] Image resizing and thumbnails for uploaded photos.
+- [ ] Social previews: Open Graph images for beans and reviews (bag artwork + rating).
 - [ ] Commit the passkey end-to-end test (see AGENTS.md §4) as a script and run it in CI.
-- [ ] Fix the ESLint setup.

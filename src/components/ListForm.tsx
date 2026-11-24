@@ -1,3 +1,5 @@
+'use client'
+
 import { useState } from 'react'
 import { LIMITS } from '@convex/lib/constants'
 import { errorMessage } from '~/lib/format'
