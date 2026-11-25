@@ -46,9 +46,9 @@ beans."*
   up/down buttons; add beans from the bean page or the list itself.
 
 **Accounts**
-- Sign in with a **username and a passkey**: no password, no email. One field handles
-  both sign-up (new username) and sign-in (existing username). Passkeys can be added and
-  removed in Settings.
+- **Sign in with Google**: one button handles both sign-up and sign-in. A new account
+  gets a username (the `@handle` in profile URLs) made from the Google name, and the
+  Google name as its display name. Both can be changed in Settings.
 
 ## Tech stack
 
@@ -56,7 +56,7 @@ beans."*
 | --- | --- |
 | Web framework | [Next.js](https://nextjs.org) 16 (App Router, Server Components, Turbopack) |
 | Backend & database | [Convex](https://convex.dev): queries, mutations, file storage, full-text search, realtime |
-| Auth | [Convex Auth](https://docs.convex.dev/auth/convex-auth/) (component API), username + passkey, with its Next.js SSR integration (httpOnly cookies) |
+| Auth | [Convex Auth](https://docs.convex.dev/auth/convex-auth/) (component API), Google sign-in, with its Next.js SSR integration (httpOnly cookies) |
 | Data fetching | `convex/nextjs` (`preloadQuery`, `fetchQuery`) in Server Components → `usePreloadedQuery` / `usePaginatedQuery` live in the browser |
 | Styling | Tailwind CSS v4, Fraunces + Inter via `next/font`, lucide-react icons |
 | Hosting | Vercel (site) + Convex Cloud (backend) |
@@ -72,8 +72,9 @@ bun run seed       # optional: 5 roasters and 12 sample beans (skipped if beans 
 ```
 
 The first `bun run dev` asks you to log in to Convex and create a project, and writes
-`NEXT_PUBLIC_CONVEX_URL` to `.env.local`. Passkeys work on `http://localhost:3000`
-without any configuration. [`.env.example`](.env.example) lists every environment
+`NEXT_PUBLIC_CONVEX_URL` to `.env.local`. The backend won't deploy until Google
+sign-in is configured on the Convex deployment: see
+[Step 3](#step-3-set-up-google-sign-in) below. [`.env.example`](.env.example) lists every environment
 variable and where each one is set (`.env.local`, the Convex deployment, or Vercel).
 
 | Script | What it does |
@@ -90,7 +91,7 @@ There's no Node on the original dev machine: Bun runs everything, including
 `next`, `tsc`, and `eslint`.
 
 AI coding agents: read [AGENTS.md](AGENTS.md). It explains how to run the app
-without a Convex account, take screenshots, and test passkey sign-in headlessly on this setup.
+without a Convex account and take screenshots on this setup.
 
 ## Deploying
 
@@ -146,30 +147,77 @@ bun run seed
 
 The site works at this point, but **signing in doesn't yet**. That's step 3.
 
-### Step 3: Tell Convex the site's address (for passkeys)
+### Step 3: Set up Google sign-in
 
-Passkeys are tied to the exact domain they were created on, so the backend has to know
-it. In a terminal in this project, using **your** address from step 2:
+Sign-in uses Google accounts. You register Crema with Google once, then give the
+backend the keys Google hands you. Until these are set, the backend **won't deploy**
+(`bun run dev` and the Vercel build both stop with an error naming the missing
+variables).
+
+**3a. Find your backend's callback address.** In a terminal in this project:
 
 ```sh
-bunx convex env set PASSKEY_RP_ID crema-abc123.vercel.app
-bunx convex env set PASSKEY_ORIGIN https://crema-abc123.vercel.app,http://localhost:3000
+bunx convex env get CONVEX_SITE_URL
 ```
 
-- There's no `--prod`, so these go to the development database.
-- `PASSKEY_RP_ID` is just the domain: no `https://`, no trailing `/`.
-- `PASSKEY_ORIGIN` is the full address with `https://`. The comma-separated
-  `http://localhost:3000` keeps the local site allowed.
+It prints something like `https://happy-animal-123.convex.site`. Google will send people
+back to that address followed by `/oauth/google/callback`:
+`https://happy-animal-123.convex.site/oauth/google/callback`.
 
-> **Passkeys then work on the Vercel site only.** `PASSKEY_RP_ID` holds one domain.
-> While it's the Vercel domain, signing in at `localhost:3000` doesn't work, and
-> accounts created there before can't sign in. Beans and seed data are unaffected. To
-> sign in locally again, set `PASSKEY_RP_ID` back to `localhost`, which stops
-> sign-in on Vercel.
+**3b. Register the app with Google.** In the
+[Google Cloud console](https://console.cloud.google.com/):
+
+1. Create a project (or pick one), then open **Google Auth Platform** at
+   `https://console.cloud.google.com/auth/overview?project=<your-project-id>` (or
+   **APIs & Services → OAuth consent screen**). The console's Welcome page doesn't
+   link to it directly.
+2. The first time, click **Get started** and fill in the basics: app name (`Crema`),
+   your support email, audience **External**, and a contact email.
+3. Under **Branding**, fill in the rest, or **Publish app** stays greyed out:
+   - **App logo:** leave empty. A logo makes Google review the app.
+   - **Application home page:** your site, e.g. `https://crema-abc123.vercel.app`
+   - **Privacy policy link:** `https://crema-abc123.vercel.app/privacy`
+   - **Terms of service link:** `https://crema-abc123.vercel.app/terms`
+   - **Authorized domains:** the bare domain, e.g. `crema-abc123.vercel.app` (no
+     `https://`, no trailing `/`).
+   - **Developer contact information** (bottom of the page): your email.
+
+   Click **Save**. Google doesn't open these links for an app like this, so they
+   don't need to be live yet.
+4. Under **Audience**, click **Publish app**. While the app is in *Testing*, only the
+   Google accounts you list as test users can sign in. Crema only asks for name, email,
+   and profile picture, so publishing needs no review by Google.
+5. Under **Clients**, click **Create client**. Pick **Web application**, and under
+   **Authorized redirect URIs** add the callback address from 3a. You don't need any
+   *Authorized JavaScript origins*.
+6. Create it, and copy the **Client ID** and **Client secret** right away (or click
+   **Download JSON**): Google may not show the secret again.
+
+**3c. Give the keys and your site's address to the backend**, using your values from
+3b and step 2:
+
+```sh
+bunx convex env set AUTH_GOOGLE_CLIENT_ID 1234-abc.apps.googleusercontent.com
+bunx convex env set AUTH_GOOGLE_CLIENT_SECRET GOCSPX-your-secret
+bunx convex env set SITE_ORIGIN https://crema-abc123.vercel.app,http://localhost:3000
+```
+
+- There's no `--prod`, so these go to the development database, which both the Vercel
+  site and `localhost:3000` use.
+- `SITE_ORIGIN` lists the addresses Google sign-in may return to: the full address
+  with `https://` and no trailing `/`, comma-separated. Keeping
+  `http://localhost:3000` lets you sign in locally too.
+- If you set `PASSKEY_RP_ID` and `PASSKEY_ORIGIN` before, they're no longer used. You
+  can remove them with `bunx convex env remove PASSKEY_RP_ID` (and the same for
+  `PASSKEY_ORIGIN`).
+
+**3d. Redeploy.** Push your code to the main branch, or click **Redeploy** on the latest
+deployment in Vercel.
 
 ### Step 4: Try it
 
-Open your site, click **Sign in**, pick a username, and create a passkey. You should see
+Open your site, click **Sign in**, then **Continue with Google**. You land on Settings
+with a username made from your Google name; change it there if you like. You should see
 the same beans as at `localhost:3000`. Share the address with your friends: anyone
 signed in can add beans.
 
@@ -185,19 +233,22 @@ TypeScript error (run `bun run typecheck` and `bun run build` locally first).
 ### Later: switching to the production database
 
 Production is a separate, empty database with no data and no settings. Nothing in
-`vercel.json` changes: you swap the key and set the passkey variables.
+`vercel.json` changes: you swap the key and set the Google sign-in variables.
 
-1. **Pick your final domain first.** Each person's passkey is bound to `PASSKEY_RP_ID`.
-   If you change it after people sign up, they're locked out. For a custom domain, add
-   it in Vercel (**Settings → Domains**) before the next steps.
+1. For a custom domain, add it in Vercel (**Settings → Domains**) first. Unlike
+   passkeys, Google accounts aren't tied to the domain, so you can change it later:
+   just update `SITE_ORIGIN`.
 2. In the Convex dashboard, pick **Production** in the deployment switcher, go to
    **Settings**, and generate a **production deploy key** (it starts with `prod:`).
 3. In Vercel, under **Settings → Environment Variables**, replace the value of
    `CONVEX_DEPLOY_KEY` with that key (still **Production only**).
-4. Set the passkey variables on production:
+4. Production has its own callback address: run `bunx convex env get CONVEX_SITE_URL --prod`,
+   and add `<that address>/oauth/google/callback` as a second **Authorized redirect URI**
+   on the same Google client (step 3b). Then set the variables on production:
    ```sh
-   bunx convex env set PASSKEY_RP_ID your-final-domain --prod
-   bunx convex env set PASSKEY_ORIGIN https://your-final-domain --prod
+   bunx convex env set AUTH_GOOGLE_CLIENT_ID 1234-abc.apps.googleusercontent.com --prod
+   bunx convex env set AUTH_GOOGLE_CLIENT_SECRET GOCSPX-your-secret --prod
+   bunx convex env set SITE_ORIGIN https://your-final-domain --prod
    ```
 5. Redeploy in Vercel (or push to main). The build now deploys `convex/` to production
    and builds the site against it.
@@ -211,7 +262,7 @@ Production is a separate, empty database with no data and no settings. Nothing i
 
 | Table | What it holds |
 | --- | --- |
-| `users` | Profile fields (name, bio, location, avatar, favorite bean ids) and denormalized `stats` counters. Usernames and passkeys live in Convex Auth's components, not here. |
+| `users` | Profile fields (name, bio, location, avatar, favorite bean ids) and denormalized `stats` counters. Usernames and linked Google accounts live in Convex Auth's components, not here. |
 | `roasters` | Name, URL slug, location, website, `beanCount`. |
 | `beans` | Catalog fields, `roasterName` (denormalized), a `searchText` field for full-text search, and aggregates: `logCount`, `brewerCount`, `likeCount`, `wishlistCount`, `ratingCount`/`ratingSum`/`ratingAvg`, `ratingHistogram` (10 half-star buckets). |
 | `userBeans` | One row per (user, bean): `brewed`, `liked`, `wishlisted`, `rating`, `brewCount`, `lastBrewedOn`. This is the Letterboxd "relationship with a film". |
@@ -265,13 +316,27 @@ user is preloaded once in the root layout and shared through `useMe()`.
 
 ### Auth
 
-`convex/auth.ts` sets up Convex Auth and the username + passkey method;
-`users.createUser` creates the profile row on sign-up. On the web side:
+`convex/auth.ts` sets up Convex Auth and the Google method. On a first sign-in,
+`users.createUser` creates the profile row and gives it a unique username (stored in
+the `authUsername` component, which here is only a handle registry, not a sign-in
+method). The sign-in flow:
+
+1. **Continue with Google** (`src/app/signin/SignInForm.tsx`) calls
+   `startSignInWithGoogle`, which checks the return address against `SITE_ORIGIN` and
+   sends the browser to Google.
+2. Google redirects to the backend's `<CONVEX_SITE_URL>/oauth/google/callback`
+   (served by the `authGoogle` component), which sends the browser back to
+   `/signin?code=…`.
+3. The sign-in page redeems the code with `completeSignInWithGoogle` through the
+   `/auth/signin` route, which sets the session cookies. New accounts then go to
+   `/settings?welcome=1`; others go back where they came from.
+
+On the web side:
 
 - `src/lib/serverAuth.ts` + `src/app/auth/{signin,refresh,signout}/route.ts`: route
   handlers that proxy sign-in calls to Convex and keep the refresh token in an
-  **httpOnly cookie**. Only the functions listed in `signIn` (the passkey "finish"
-  steps) can create a session through them.
+  **httpOnly cookie**. Only the functions listed in `signIn`
+  (`completeSignInWithGoogle`) can create a session through them.
 - `src/lib/convexAuth.tsx`: the proxy builder, the Server Component token reader, and
   `ConvexAuthNextjsServerProvider`, which wraps the app in `src/app/layout.tsx`.
 - Server code in `convex/` reads the user with `getAuthUserId(ctx)` and never trusts a
@@ -309,14 +374,13 @@ scripts/shoot.ts            headless screenshot/console-error helper (see AGENTS
 ## Quirks and limitations
 
 **Accounts**
-- **Passkeys only.** Nobody needs a password, but a user must keep a passkey on some
-  device. A passkey syncs through Apple, Google, or Microsoft accounts; across ecosystems
-  (say, an Android phone and an iPhone), users should add a second passkey in Settings.
-  There's no recovery path if every passkey is lost.
+- **Google accounts only.** Each Google account is one Crema account. There's no other
+  way to sign in, and no way to move an account to a different Google account.
+- Accounts created with passkeys (before the switch to Google) still exist, with their
+  diaries and profiles, but can no longer be signed in to.
 - Usernames are limited to letters, numbers, and underscores (2–24 characters) so they
-  work in URLs. Convex Auth itself allows more, but the sign-in page enforces this. There's
-  no way to change a username or delete an account yet.
-- `PASSKEY_RP_ID` can't change after launch (see Deploying).
+  work in URLs. Changing your username changes your profile URL; old links stop working.
+  There's no way to delete an account yet.
 
 **Catalog**
 - Anyone signed in can add beans and roasters. Only the person who added a bean can
@@ -357,7 +421,8 @@ scripts/shoot.ts            headless screenshot/console-error helper (see AGENTS
 
 **UI**
 - List items can hold a note in the database, but the UI doesn't show or edit notes
-  yet. Passkeys can be renamed in the backend, but not in the UI.
+  yet.
+- The Google profile picture isn't used; avatars are uploaded in Settings.
 - Lists can be reordered only with up/down buttons, and hold at most 250 beans.
 - Brew dates are plain calendar dates (`YYYY-MM-DD`) in the user's own time zone.
 
@@ -373,9 +438,9 @@ scripts/shoot.ts            headless screenshot/console-error helper (see AGENTS
 - [ ] Moderation: admin role, report a bean or review, merge duplicate beans, edit roasters.
 - [ ] Rate limiting on writes (`@convex-dev/rate-limiter`), especially bean creation and uploads.
 - [ ] Clean up orphaned uploads (upload after validating, or a scheduled sweep).
-- [ ] Notes on list items, drag-and-drop reordering, renaming passkeys.
-- [ ] Member search; account settings for changing username and deleting an account.
+- [ ] Notes on list items, drag-and-drop reordering.
+- [ ] Member search; deleting an account.
 - [ ] "Year in coffee" stats page: brews per month, top origins, processes, and roasters, rating spread.
 - [ ] Image resizing and thumbnails for uploaded photos.
 - [ ] Social previews: Open Graph images for beans and reviews (bag artwork + rating).
-- [ ] Commit the passkey end-to-end test (see AGENTS.md §4) as a script and run it in CI.
+- [ ] An end-to-end sign-in test (needs a fake Google, or a test-only sign-in method; see AGENTS.md §4).

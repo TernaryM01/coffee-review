@@ -1,26 +1,20 @@
 'use client'
 
-import { useAddPasskey, useRemovePasskey } from '@convex-dev/auth/methods/username-passkey/react'
-import { useMutation, type Preloaded } from 'convex/react'
-import { KeyRound, Plus, X } from 'lucide-react'
+import { useMutation } from 'convex/react'
+import { Plus, X } from 'lucide-react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { api } from '@convex/_generated/api'
-import { LIMITS } from '@convex/lib/constants'
+import { HANDLE_PATTERN, LIMITS } from '@convex/lib/constants'
 import type { BeanCard } from '@convex/lib/hydrate'
 import { BeanPicker } from '~/components/BeanPicker'
 import { BeanPoster } from '~/components/BeanPoster'
 import { Avatar, Dialog, ErrorText, SectionTitle } from '~/components/ui'
 import { errorMessage } from '~/lib/format'
-import { useImageUpload, useMe, usePreloaded, type Me } from '~/lib/hooks'
+import { useImageUpload, useMe, type Me } from '~/lib/hooks'
 
-export function SettingsView({
-  welcome,
-  passkeys,
-}: {
-  welcome: boolean
-  passkeys: Preloaded<typeof api.auth.listPasskeys>
-}) {
+export function SettingsView({ welcome }: { welcome: boolean }) {
   const me = useMe()
   // Signed-in only (src/proxy.ts); null only right after signing out here.
   if (!me) return null
@@ -30,7 +24,8 @@ export function SettingsView({
         <div className="rounded-lg border border-leaf/40 bg-leaf/10 p-4 text-sm">
           <p className="font-semibold text-leaf">Welcome to Crema, @{me.username}!</p>
           <p className="mt-1 text-muted">
-            Add a display name and your favorite beans, or jump straight in and{" "}
+            We picked your username from your Google name; change it below if you like. Add your favorite
+            beans, or jump straight in and{" "}
             <Link href="/beans" className="text-crema hover:underline">
               find something to log
             </Link>
@@ -41,8 +36,8 @@ export function SettingsView({
       <h1 className="font-display text-3xl">Settings</h1>
       {/* key: start the forms fresh if the account changes */}
       <ProfileSection key={me._id} me={me} />
+      <UsernameSection key={`username-${me._id}`} me={me} />
       <FavoritesSection me={me} />
-      <PasskeySection preloaded={passkeys} />
     </div>
   )
 }
@@ -192,69 +187,69 @@ function FavoritesSection({ me }: { me: Me }) {
   )
 }
 
-const PASSKEY_ERRORS: Record<string, string> = {
-  LAST_PASSKEY: "You can't remove your only passkey — add another one first.",
-  TOO_MANY_PASSKEYS: 'You have the maximum number of passkeys.',
-  PASSKEY_ALREADY_REGISTERED: 'This device already has a passkey for your account.',
-  CEREMONY_ABORTED: '',
-  NOT_LOGGED_IN: 'Please sign in again.',
-}
-
-function PasskeySection({ preloaded }: { preloaded: Preloaded<typeof api.auth.listPasskeys> }) {
-  const result = usePreloaded(preloaded)
-  const { addPasskey, pending: adding } = useAddPasskey(api.auth)
-  const { removePasskey, pending: removing } = useRemovePasskey(api.auth)
+function UsernameSection({ me }: { me: Me }) {
+  const setUsername = useMutation(api.users.setUsername)
+  const router = useRouter()
+  const [username, setValue] = useState(me.username)
+  const [status, setStatus] = useState<'idle' | 'saving' | 'saved'>('idle')
   const [error, setError] = useState<string | null>(null)
-  const passkeys = result?.success ? result.passkeys : []
-
-  const report = (r: { success: boolean; userError?: { error: string } }) => {
-    if (!r.success) {
-      const code = r.userError?.error ?? 'OTHER_ERROR'
-      setError(PASSKEY_ERRORS[code] ?? 'Something went wrong with the passkey. Please try again.')
-    }
-  }
+  const unchanged = username.trim() === me.username
 
   return (
     <section>
-      <SectionTitle>Passkeys</SectionTitle>
+      <SectionTitle>Username</SectionTitle>
       <p className="mb-4 text-sm text-muted">
-        Passkeys are how you sign in. Add one on each device that doesn't sync with the others
-        (for example, an Android phone and a Windows laptop).
+        Your public handle and profile address. Changing it changes your profile link, and the old link stops
+        working.
       </p>
-      <ul className="mb-4 divide-y divide-line rounded-lg border border-line">
-        {passkeys.map((p) => (
-          <li key={p.passkeyId} className="flex items-center gap-3 px-3 py-2.5 text-sm">
-            <KeyRound className="size-4 text-dim" />
-            <span className="flex-1">
-              {p.name ?? 'Passkey'}
-              <span className="ml-2 text-xs text-dim">added {new Date(p.createdAt).toLocaleDateString()}</span>
-            </span>
-            <button
-              disabled={removing || passkeys.length < 2}
-              title={passkeys.length < 2 ? 'Add another passkey before removing this one' : undefined}
-              className="text-xs text-dim hover:text-cherry disabled:opacity-40 disabled:hover:text-dim"
-              onClick={async () => {
-                setError(null)
-                report(await removePasskey(p.passkeyId))
-              }}
-            >
-              Remove
-            </button>
-          </li>
-        ))}
-        {passkeys.length === 0 && <li className="px-3 py-2.5 text-sm text-dim">No passkeys found.</li>}
-      </ul>
-      <ErrorText>{error || null}</ErrorText>
-      <button
-        className="btn-ghost mt-2"
-        disabled={adding}
-        onClick={async () => {
+      <form
+        className="space-y-4"
+        onSubmit={async (e) => {
+          e.preventDefault()
           setError(null)
-          report(await addPasskey())
+          const next = username.trim()
+          if (!HANDLE_PATTERN.test(next)) {
+            setError('Usernames are 2–24 letters, numbers, or underscores.')
+            return
+          }
+          setStatus('saving')
+          try {
+            await setUsername({ username: next })
+            setStatus('saved')
+            router.refresh() // server-rendered links use the username
+          } catch (err) {
+            setError(errorMessage(err))
+            setStatus('idle')
+          }
         }}
       >
-        <Plus className="size-4" /> {adding ? 'Waiting for your device…' : 'Add a passkey'}
-      </button>
+        <label className="block">
+          <span className="label">Username</span>
+          <div className="flex items-center gap-2">
+            <span className="text-dim">@</span>
+            <input
+              value={username}
+              maxLength={24}
+              onChange={(e) => {
+                setValue(e.target.value)
+                setStatus('idle')
+              }}
+              autoCapitalize="none"
+              autoComplete="off"
+              spellCheck={false}
+              className="field"
+            />
+          </div>
+          <span className="mt-1 block text-xs text-dim">Your profile: /u/{username.trim() || me.username}</span>
+        </label>
+        <ErrorText>{error}</ErrorText>
+        <div className="flex items-center gap-3">
+          <button className="btn-primary" disabled={status === 'saving' || unchanged}>
+            {status === 'saving' ? 'Saving…' : 'Change username'}
+          </button>
+          {status === 'saved' && <span className="text-sm text-leaf">Saved.</span>}
+        </div>
+      </form>
     </section>
   )
 }

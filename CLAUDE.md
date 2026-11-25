@@ -21,4 +21,4 @@ before starting a dev server or a browser):
 
 - Don't run `git`; the owner handles version control.
 - All changes to a user's brewed/liked/wishlisted/rating state must go through `updateUserBean` in `convex/lib/userBeanState.ts`, which keeps bean aggregates and user stats in sync.
-- Auth is Convex Auth (new component API) with username + passkey. `PASSKEY_RP_ID` / `PASSKEY_ORIGIN` must be set on production.
+- Auth is Convex Auth (new component API) with Google sign-in only. `AUTH_GOOGLE_CLIENT_ID` / `AUTH_GOOGLE_CLIENT_SECRET` are required on every deployment (it won't deploy without them); `SITE_ORIGIN` lists the site origins Google may return to. Usernames live in the `authUsername` component, which is a handle registry here, not a sign-in method.

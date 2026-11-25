@@ -127,33 +127,35 @@ What **doesn't** work here, so don't spend time on it:
 | Reusing a fixed DevTools port | if another headless Edge holds it, you silently drive *that* browser, with its cookies |
 | Killing `msedge*.exe` by name | don't: `msedgewebview2.exe` belongs to the user's other apps (VS Code, etc.) |
 
-## 4. Signed-in flows (passkeys) in a headless browser
+## 4. Signed-in flows in a headless browser
 
-Sign-in is username + passkey, and the session lives in **httpOnly cookies** set by
-the `/auth/*` route handlers. Chrome DevTools has a virtual authenticator, so the
-whole flow can be automated. This was done with a throwaway script based on
-`scripts/shoot.ts`: sign up, log a brew, check signed-in server HTML, sign out, sign back in.
+Sign-in is **Google only** (Convex Auth's `google` method), and the session lives in
+**httpOnly cookies** set by the `/auth/*` route handlers. A headless browser can't
+sign in to Google, so the full sign-in flow can't be automated here. Leave the
+in-browser sign-in check to the owner, and don't report it as tested.
 
-- Use **http://localhost:3000**: passkeys only accept the configured origin
-  (`PASSKEY_ORIGIN`, which defaults to `http://localhost:3000`). Another port fails.
-  Run the production build on 3000 (`bun run start`).
-- Before navigating:
-  ```js
-  send('WebAuthn.enable', { enableUI: false })
-  send('WebAuthn.addVirtualAuthenticator', { options: {
-    protocol: 'ctap2', transport: 'internal', hasResidentKey: true,
-    hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true } })
-  ```
-- Start signed out with a fresh profile, or call
-  `Storage.clearDataForOrigin({ origin: 'http://localhost:3000', storageTypes: 'all' })`
-  before the first page load.
-- **Wait until the form itself is hydrated** (it has `__react…` keys) before
-  submitting. A click that lands earlier does a native form submit, which reloads
-  `/signin`. The sign-in button is disabled until hydration for this reason.
-- **Sign-in navigates the page**, so an in-page `await` breaks ("Inspected target
-  navigated or closed"). Submit in one `Runtime.evaluate`, then poll from outside with
-  short evaluates until `location.pathname` changes. New usernames land on
-  `/settings?welcome=1`; existing ones go to the `redirect` target or `/`.
+What you can check:
+
+- The backend: `convex/users.test.ts` covers account creation (username from the
+  Google name, collisions, renaming) through `internal.users.createUser`.
+- The sign-in page: `bun scripts/shoot.ts signin=/signin` should show an enabled
+  **Continue with Google** button and no console errors. Clicking it calls
+  `startSignInWithGoogle`, which needs `AUTH_GOOGLE_CLIENT_ID` set and the page's
+  origin listed in `SITE_ORIGIN` (default `http://localhost:3000`).
+- In anonymous local mode (§1) the backend won't deploy until `AUTH_GOOGLE_CLIENT_ID`
+  and `AUTH_GOOGLE_CLIENT_SECRET` are set on it. Placeholder values are enough for
+  everything except actually signing in:
+  `CONVEX_AGENT_MODE=anonymous bunx convex env set AUTH_GOOGLE_CLIENT_ID placeholder`
+  (and the same for the secret), then push again. This sequence hasn't been tried yet.
+
+Still useful when driving signed-in pages some other way:
+
+- **Wait until the page is hydrated** (elements have `__react…` keys) before clicking.
+  The sign-in button is disabled until hydration.
+- Navigations break an in-page `await` ("Inspected target navigated or closed").
+  Act in one `Runtime.evaluate`, then poll from outside with short evaluates until
+  `location.pathname` changes. New accounts land on `/settings?welcome=1`; existing
+  ones go to the `redirect` target or `/`.
 - Typing into React inputs: use the native value setter, then dispatch `input`:
   `Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, v); el.dispatchEvent(new Event('input', { bubbles: true }))`.
 - Check text with **`textContent`, not `innerText`**: `innerText` applies CSS

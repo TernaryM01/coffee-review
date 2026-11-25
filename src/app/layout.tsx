@@ -72,6 +72,12 @@ function Footer() {
           <Link href="/beans/new" className="hover:text-ink">
             Add a bean
           </Link>
+          <Link href="/privacy" className="hover:text-ink">
+            Privacy
+          </Link>
+          <Link href="/terms" className="hover:text-ink">
+            Terms
+          </Link>
         </nav>
       </div>
     </footer>

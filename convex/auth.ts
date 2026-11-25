@@ -1,26 +1,15 @@
 import { components, internal } from "./_generated/api";
 import { env } from "./_generated/server";
 import { setupConvexAuth } from "@convex-dev/auth/server";
-import { setupUsernamePasskey } from "@convex-dev/auth/methods/username-passkey/server";
+import { setupGoogle } from "@convex-dev/auth/methods/google/server";
 
 const auth = setupConvexAuth({ component: components.auth });
 export const { signOut, refreshSession, isAuthenticated } = auth;
 
-export const {
-  startSignInWithUsernamePasskey,
-  startAutofillSignInWithUsernamePasskey,
-  finishSignUpWithUsernamePasskey,
-  finishSignInWithUsernamePasskey,
-  listPasskeys,
-  renamePasskey,
-  startAddPasskey,
-  verifyAddPasskey,
-  finishAddPasskey,
-  startRemovePasskey,
-  finishRemovePasskey,
-} = setupUsernamePasskey(auth, {
-  component: components.authPasskey,
-  usernameComponent: components.authUsername,
-  rpId: env.PASSKEY_RP_ID ?? "localhost",
-  origin: env.PASSKEY_ORIGIN?.split(",") ?? "http://localhost:3000",
+export const { startSignInWithGoogle, completeSignInWithGoogle } = setupGoogle(auth, {
+  component: components.authGoogle,
+  allowedRedirectOrigins: (env.SITE_ORIGIN ?? "http://localhost:3000")
+    .split(",")
+    .map((origin) => origin.trim().replace(/\/+$/, ""))
+    .filter((origin) => origin !== ""),
 }).attachUserCallbacks({ createUser: internal.users.createUser });

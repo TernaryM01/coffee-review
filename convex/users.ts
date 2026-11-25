@@ -1,23 +1,95 @@
+import { vGoogleProfile, type GoogleProfile } from "@convex-dev/auth/methods/google/server";
 import { ConvexError, v } from "convex/values";
-import { internalMutation, mutation, query } from "./_generated/server";
+import { components } from "./_generated/api";
+import type { Id } from "./_generated/dataModel";
+import { internalMutation, mutation, query, type MutationCtx } from "./_generated/server";
 import { optionalUserId, requireUserId } from "./lib/auth";
-import { LIMITS } from "./lib/constants";
+import { HANDLE_PATTERN, LIMITS } from "./lib/constants";
 import { getUserIdByUsername, Loader, toProfile } from "./lib/hydrate";
 import { emptyStats } from "./lib/userBeanState";
 import { cleanText } from "./lib/validate";
 import { assertImage } from "./files";
 import { followStatus } from "./follows";
 
-/** Called by Convex Auth when a new account signs up. */
+/**
+ * Called by Convex Auth when someone signs in with Google for the first time.
+ * Usernames (the public @handle in profile URLs) are stored in the authUsername
+ * component; a new account gets one made from its Google name, which the user
+ * can change in Settings.
+ */
 export const createUser = internalMutation({
   args: {
-    method: v.object({ name: v.literal("usernamePasskey"), profile: v.object({}) }),
+    method: v.object({ name: v.literal("google"), profile: vGoogleProfile }),
   },
   returns: v.id("users"),
-  handler: async (ctx) => {
-    return await ctx.db.insert("users", { stats: emptyStats() });
+  handler: async (ctx, { method }) => {
+    const userId = await ctx.db.insert("users", {
+      name: cleanText(method.profile.name?.slice(0, 60), 60, "Display name"),
+      stats: emptyStats(),
+    });
+    await assignUsername(ctx, userId, method.profile);
+    return userId;
   },
 });
+
+/** "Mauri Ericson" → "mauri_ericson": letters, digits and underscores, 2–20 long. */
+function handleBase(profile: GoogleProfile): string {
+  for (const source of [profile.name, profile.email?.split("@")[0]]) {
+    const base = (source ?? "")
+      .normalize("NFKD")
+      .replace(/[\u0300-\u036f]/g, "") // strip accents: "José" → "Jose"
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .slice(0, 20)
+      .replace(/_+$/, "");
+    if (base.length >= 2) return base;
+  }
+  return "brewer";
+}
+
+async function assignUsername(ctx: MutationCtx, userId: Id<"users">, profile: GoogleProfile) {
+  const base = handleBase(profile);
+  for (let attempt = 0; attempt < 20; attempt++) {
+    // The first try is the bare name; later ones add 2, then 3, then 4 random digits.
+    const digits = attempt === 0 ? 0 : Math.min(2 + Math.floor(attempt / 5), 4);
+    const suffix = digits === 0 ? "" : String(Math.floor(Math.random() * 10 ** digits)).padStart(digits, "0");
+    const result = await ctx.runMutation(components.authUsername.public.setUsername, {
+      userId,
+      username: base + suffix,
+    });
+    if (result.success) return;
+  }
+  throw new ConvexError("Couldn't pick a username for your account. Please try again.");
+}
+
+/** Change the signed-in user's @handle. Their old profile URL stops working. */
+export const setUsername = mutation({
+  args: { username: v.string() },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await changeUsername(ctx, await requireUserId(ctx), args.username);
+    return null;
+  },
+});
+
+export async function changeUsername(ctx: MutationCtx, userId: Id<"users">, raw: string) {
+  const username = raw.trim();
+  if (!HANDLE_PATTERN.test(username)) {
+    throw new ConvexError("Usernames are 2–24 letters, numbers, or underscores.");
+  }
+  const result = await ctx.runMutation(components.authUsername.public.setUsername, {
+    userId,
+    username,
+  });
+  if (!result.success) {
+    throw new ConvexError(
+      result.userError.error === "USERNAME_TAKEN"
+        ? "That username is taken."
+        : "Usernames are 2–24 letters, numbers, or underscores.",
+    );
+  }
+}
 
 /** The signed-in user, or null. */
 export const me = query({
@@ -36,6 +108,7 @@ export const me = query({
       bio: user.bio ?? null,
       location: user.location ?? null,
       stats: user.stats,
+      joinedAt: user._creationTime,
       favorites: favorites.filter((b) => b !== null),
     };
   },
