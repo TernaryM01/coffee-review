@@ -101,94 +101,109 @@ The live app has two parts, hosted in two places:
 - **The website** (everything in `src/`) runs on **Vercel**.
 
 You don't deploy them separately. Each time Vercel builds the site, the build first
-pushes `convex/` to your production Convex deployment, then builds the website
-against it. That's what the `buildCommand` in `vercel.json` does. Vercel just needs a
-key that's allowed to deploy to your Convex project.
+pushes `convex/` to the Convex deployment named by your deploy key, then builds the
+website against it. That's what the `buildCommand` in `vercel.json` does.
+
+Every Convex project has two separate databases, **development** and **production**.
+This guide puts the site on Vercel using your **development** database, the same
+one you see at `http://localhost:3000`, so friends can try it with the same content.
+[Switching to production](#later-switching-to-the-production-database) comes at the end.
 
 ### What you need first
 
 - A **GitHub** account with this project pushed to a repository. Vercel deploys from
   a Git repository.
-- A **Convex** account (free).
+- A **Convex** account (free), with a project created by running `bun run dev` once
+  and logging in when asked.
 - A **Vercel** account (the free Hobby plan is enough). Signing up with GitHub is
   easiest, because Vercel then sees your repositories.
 
-### Step 1: Create the Convex project
-
-If you've already run `bun run dev` while logged in to Convex (not in local
-`CONVEX_AGENT_MODE=anonymous` mode), you have a project. Skip to step 2.
-
-Otherwise, run `bun run dev` once, log in when asked, and create a new project
-(call it `crema`). Every Convex project comes with two separate databases:
-
-- **Development**: what `bun run dev` uses on your machine.
-- **Production**: what the live site will use. It starts empty, and test data from
-  development never shows up there.
-
-### Step 2: Get a production deploy key from Convex
+### Step 1: Get a deploy key for the dev database
 
 1. Open the [Convex dashboard](https://dashboard.convex.dev) and click your project.
-2. Use the deployment switcher at the top to pick **Production**, not Development.
-3. Go to **Settings** and generate a **production deploy key**. Copy it. It starts
-   with `prod:`.
+2. Use the deployment switcher at the top to pick **Development**.
+3. Go to **Settings → Deploy keys** and click **Generate a deploy key**. Copy it.
 
-Treat this key like a password: anyone who has it can replace your live backend.
+Treat this key like a password: anyone who has it can replace your backend.
 
-### Step 3: Put the website on Vercel
+If the catalog is empty, fill it with sample beans:
+
+```sh
+bun run seed
+```
+
+### Step 2: Put the website on Vercel
 
 1. In Vercel, click **Add New… → Project**, and **Import** your GitHub repository.
 2. Leave the detected settings as they are (framework *Next.js*, root directory
    `./`). `vercel.json` already sets the install and build commands.
-3. Under **Environment Variables**, add `CONVEX_DEPLOY_KEY` with the key from step 2.
+3. Under **Environment Variables**, add `CONVEX_DEPLOY_KEY` with the key from step 1,
+   and set it to apply to **Production only** (untick *Preview* and *Development*).
+   Don't add `NEXT_PUBLIC_CONVEX_URL`: the build sets it.
 4. Click **Deploy**. The build takes a few minutes, and Vercel then shows your site's
-   address, something like `https://crema-abc123.vercel.app`. The exact name depends on
-   what's still free. You'll find it later under the project's **Domains**.
-5. In the project's **Settings → Environment Variables**, edit `CONVEX_DEPLOY_KEY` so
-   it applies to **Production only**. Untick *Preview* and *Development*.
-   Otherwise every push to any branch (a "preview" build) would deploy that branch's
-   backend code to your production database. Preview builds will then fail for lack
-   of a key. That's expected, and it's harmless.
+   address, something like `https://crema-abc123.vercel.app`. You'll find it later
+   under the project's **Domains**.
 
-The site works at this point, but **signing in doesn't yet**. That's step 4.
+The site works at this point, but **signing in doesn't yet**. That's step 3.
 
-### Step 4: Tell Convex the site's address (for passkeys)
+### Step 3: Tell Convex the site's address (for passkeys)
 
 Passkeys are tied to the exact domain they were created on, so the backend has to know
-it. In a terminal in this project, using **your** address from step 3:
+it. In a terminal in this project, using **your** address from step 2:
 
 ```sh
-bunx convex env set PASSKEY_RP_ID crema-abc123.vercel.app --prod
-bunx convex env set PASSKEY_ORIGIN https://crema-abc123.vercel.app --prod
+bunx convex env set PASSKEY_RP_ID crema-abc123.vercel.app
+bunx convex env set PASSKEY_ORIGIN https://crema-abc123.vercel.app,http://localhost:3000
 ```
 
+- There's no `--prod`, so these go to the development database.
 - `PASSKEY_RP_ID` is just the domain: no `https://`, no trailing `/`.
-- `PASSKEY_ORIGIN` is the full address with `https://`, as it appears in the browser.
-- `--prod` sends them to the production deployment. You can also set them in the
-  Convex dashboard (Production → Settings → Environment Variables).
+- `PASSKEY_ORIGIN` is the full address with `https://`. The comma-separated
+  `http://localhost:3000` keeps the local site allowed.
 
-> **Decide on the final domain before anyone signs up.** Each person's passkey is bound
-> to `PASSKEY_RP_ID`. If you later move to a custom domain (say `crema.coffee`) and
-> change it, everyone who signed up before is locked out. If you want a custom domain,
-> add it in Vercel (**Settings → Domains**) first, then use it in both variables.
+> **Passkeys then work on the Vercel site only.** `PASSKEY_RP_ID` holds one domain.
+> While it's the Vercel domain, signing in at `localhost:3000` doesn't work, and
+> accounts created there before can't sign in. Beans and seed data are unaffected. To
+> sign in locally again, set `PASSKEY_RP_ID` back to `localhost`, which stops
+> sign-in on Vercel.
 
-### Step 5: Try it
+### Step 4: Try it
 
-1. Open your site and click **Sign in**. Pick a username and create a passkey. This is
-   your first production account; development accounts don't carry over.
-2. Optional: fill the empty catalog with the 12 sample beans:
-   ```sh
-   bunx convex run seed:catalog --prod
-   ```
-   It does nothing if the catalog already has beans.
+Open your site, click **Sign in**, pick a username, and create a passkey. You should see
+the same beans as at `localhost:3000`. Share the address with your friends: anyone
+signed in can add beans.
 
 ### After that: updating the live site
 
 Push to your repository's main branch. Vercel rebuilds, which also deploys any changes
-in `convex/` to production. No extra steps.
+in `convex/` to the dev database. No extra steps.
 
 If a deploy fails, open the deployment in Vercel and read its **Build Logs**. Two
-common causes: `CONVEX_DEPLOY_KEY` is missing or wrong (redo steps 2–3), or a
+common causes: `CONVEX_DEPLOY_KEY` is missing or wrong (redo steps 1–2), or a
 TypeScript error (run `bun run typecheck` and `bun run build` locally first).
+
+### Later: switching to the production database
+
+Production is a separate, empty database with no data and no settings. Nothing in
+`vercel.json` changes: you swap the key and set the passkey variables.
+
+1. **Pick your final domain first.** Each person's passkey is bound to `PASSKEY_RP_ID`.
+   If you change it after people sign up, they're locked out. For a custom domain, add
+   it in Vercel (**Settings → Domains**) before the next steps.
+2. In the Convex dashboard, pick **Production** in the deployment switcher, go to
+   **Settings**, and generate a **production deploy key** (it starts with `prod:`).
+3. In Vercel, under **Settings → Environment Variables**, replace the value of
+   `CONVEX_DEPLOY_KEY` with that key (still **Production only**).
+4. Set the passkey variables on production:
+   ```sh
+   bunx convex env set PASSKEY_RP_ID your-final-domain --prod
+   bunx convex env set PASSKEY_ORIGIN https://your-final-domain --prod
+   ```
+5. Redeploy in Vercel (or push to main). The build now deploys `convex/` to production
+   and builds the site against it.
+6. Optional: `bunx convex run seed:catalog --prod` fills the empty catalog with the
+   sample beans. Accounts and data from development don't carry over, so everyone
+   signs up again.
 
 ## How it works
 
