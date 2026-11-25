@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { api, components, internal } from "./_generated/api";
 import schema from "./schema";
 import { changeUsername } from "./users";
+import { setRoleAs } from "./admin";
 
 // convex-test wants Vite's import.meta.glob map; build the same thing with Bun.
 function globModules(dir: string, prefix: string) {
@@ -47,6 +48,45 @@ describe("Google sign-up", () => {
       expect(await username(nothing)).toBe("brewer");
       expect((await ctx.db.get("users", first))?.name).toBe("José Müller-Ortiz");
     });
+  });
+
+  test("admin:setAdmin grants and revokes admin by username", async () => {
+    const t = await setup();
+    const a = await t.mutation(internal.users.createUser, google({ name: "Alice" }));
+    const isAdmin = () => t.run(async (ctx) => (await ctx.db.get("users", a))?.isAdmin === true);
+
+    expect(await t.mutation(internal.admin.setAdmin, { username: "@Alice" })).toBe("@Alice is now an admin.");
+    expect(await isAdmin()).toBe(true);
+    await t.mutation(internal.admin.setAdmin, { username: "alice", admin: false });
+    expect(await isAdmin()).toBe(false);
+    await expect(t.mutation(internal.admin.setAdmin, { username: "nobody" })).rejects.toThrow("No user");
+  });
+
+  test("admins can grant and remove admin for others, but not change their own role", async () => {
+    const t = await setup();
+    const boss = await t.mutation(internal.users.createUser, google({ name: "Boss" }));
+    const b = await t.mutation(internal.users.createUser, google({ name: "Bea" }));
+    const c = await t.mutation(internal.users.createUser, google({ name: "Cal" }));
+    await t.mutation(internal.admin.setAdmin, { username: "boss" });
+    const admins = () =>
+      t.run(async (ctx) =>
+        (await Promise.all([boss, b, c].map((id) => ctx.db.get("users", id)))).map((u) => u?.isAdmin === true),
+      );
+
+    await t.run(async (ctx) => {
+      // A non-admin can't grant anything.
+      await expect(setRoleAs(ctx, b, c, true)).rejects.toThrow("Only admins");
+      await setRoleAs(ctx, boss, b, true);
+      // The new admin can manage others, including the first admin...
+      await setRoleAs(ctx, b, c, true);
+      await setRoleAs(ctx, b, c, false);
+      // ...but nobody can change their own role.
+      await expect(setRoleAs(ctx, b, b, false)).rejects.toThrow("your own");
+    });
+    expect(await admins()).toEqual([true, true, false]);
+
+    await t.run((ctx) => setRoleAs(ctx, b, boss, false));
+    expect(await admins()).toEqual([false, true, false]);
   });
 
   test("users can change their username, but not to a taken or invalid one", async () => {

@@ -1,14 +1,16 @@
 'use client'
 
-import type { Preloaded } from 'convex/react'
-import { MapPin } from 'lucide-react'
+import { useMutation, type Preloaded } from 'convex/react'
+import { MapPin, ShieldCheck } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { useState } from 'react'
 import { api } from '@convex/_generated/api'
+import type { Id } from '@convex/_generated/dataModel'
 import type { FollowStatus } from '@convex/follows'
 import { FollowButton } from '~/components/FollowButton'
-import { Avatar, Stat } from '~/components/ui'
-import { compact } from '~/lib/format'
+import { Avatar, ErrorText, Stat } from '~/components/ui'
+import { compact, errorMessage } from '~/lib/format'
 import { useMe, usePreloaded } from '~/lib/hooks'
 
 const TABS = [
@@ -52,7 +54,15 @@ export function ProfileHeader({
                 <FollowButton userId={user._id} initial={followStatus} />
               )}
             </div>
-            <p className="text-sm text-dim">@{user.username}</p>
+            <p className="flex flex-wrap items-center gap-2 text-sm text-dim">
+              @{user.username}
+              {user.isAdmin && (
+                <span className="rounded border border-crema/40 px-1.5 py-px text-[10px] font-semibold uppercase tracking-wider text-crema">
+                  Admin
+                </span>
+              )}
+            </p>
+            {me?.isAdmin && !isMe && <AdminRole userId={user._id} isAdmin={user.isAdmin} username={user.username} />}
             {user.bio && <p className="mt-2 max-w-xl text-sm text-ink/90">{user.bio}</p>}
             {user.location && (
               <p className="mt-1 flex items-center gap-1 text-xs text-muted">
@@ -98,5 +108,54 @@ export function ProfileHeader({
         })}
       </nav>
     </>
+  )
+}
+
+/** Shown to admins on other people's profiles: grant or remove admin, with a confirm step. */
+function AdminRole({ userId, isAdmin, username }: { userId: Id<'users'>; isAdmin: boolean; username: string }) {
+  const setRole = useMutation(api.admin.setRoleOf)
+  const [confirming, setConfirming] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const apply = async () => {
+    setError(null)
+    setSaving(true)
+    try {
+      await setRole({ userId, admin: !isAdmin })
+      setConfirming(false)
+    } catch (err) {
+      setError(errorMessage(err))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="mt-2 space-y-2 text-xs">
+      {confirming ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-muted">
+            {isAdmin
+              ? `Remove @${username}'s admin role?`
+              : `Make @${username} an admin? They'll be able to edit and delete any bean, and manage admins.`}
+          </span>
+          <button className={isAdmin ? 'btn-danger px-2.5 py-1 text-xs' : 'btn-primary px-2.5 py-1 text-xs'} disabled={saving} onClick={apply}>
+            {saving ? 'Saving…' : isAdmin ? 'Remove admin' : 'Make admin'}
+          </button>
+          <button className="btn-ghost px-2.5 py-1 text-xs" disabled={saving} onClick={() => setConfirming(false)}>
+            Cancel
+          </button>
+        </div>
+      ) : (
+        <button
+          className="inline-flex items-center gap-1 text-dim hover:text-ink"
+          onClick={() => setConfirming(true)}
+        >
+          <ShieldCheck className="size-3.5" /> {isAdmin ? 'Remove admin role…' : 'Make admin…'}
+        </button>
+      )}
+      <ErrorText>{error}</ErrorText>
+    </div>
   )
 }

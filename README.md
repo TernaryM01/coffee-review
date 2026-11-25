@@ -221,6 +221,30 @@ with a username made from your Google name; change it there if you like. You sho
 the same beans as at `localhost:3000`. Share the address with your friends: anyone
 signed in can add beans.
 
+### Step 5: Make yourself an admin
+
+Admins can edit and delete any bean, including the sample beans from `bun run seed`,
+which belong to nobody. Once you've signed in, run this with **your** username (shown
+in Settings):
+
+```sh
+bunx convex run admin:setAdmin '{"username": "your_username"}'
+```
+
+Add `--prod` for the production database. To take admin away again, add
+`"admin": false`. This command only works from a terminal or the Convex dashboard
+(**Functions → admin:setAdmin → Run**), never from the website, so nobody can make
+themselves an admin. It's how the first admin is made.
+
+After that, admins manage admins on the website: on anyone else's profile page, an
+admin sees **Make admin…** or **Remove admin role…** under the username. Nobody can
+change their own role there, so there's always at least one admin left. Admins show an
+**Admin** badge on their profile.
+
+As an admin, every bean page shows **Edit bean details**. The edit page has a
+**Delete bean** section at the bottom. Deleting a bean also deletes everyone's diary
+entries, ratings, likes, wishlist entries, and list entries for it.
+
 ### After that: updating the live site
 
 Push to your repository's main branch. Vercel rebuilds, which also deploys any changes
@@ -262,7 +286,7 @@ Production is a separate, empty database with no data and no settings. Nothing i
 
 | Table | What it holds |
 | --- | --- |
-| `users` | Profile fields (name, bio, location, avatar, favorite bean ids) and denormalized `stats` counters. Usernames and linked Google accounts live in Convex Auth's components, not here. |
+| `users` | Profile fields (name, bio, location, avatar, favorite bean ids), an optional `isAdmin` flag, and denormalized `stats` counters. Usernames and linked Google accounts live in Convex Auth's components, not here. |
 | `roasters` | Name, URL slug, location, website, `beanCount`. |
 | `beans` | Catalog fields, `roasterName` (denormalized), a `searchText` field for full-text search, and aggregates: `logCount`, `brewerCount`, `likeCount`, `wishlistCount`, `ratingCount`/`ratingSum`/`ratingAvg`, `ratingHistogram` (10 half-star buckets). |
 | `userBeans` | One row per (user, bean): `brewed`, `liked`, `wishlisted`, `rating`, `brewCount`, `lastBrewedOn`. This is the Letterboxd "relationship with a film". |
@@ -359,6 +383,7 @@ convex/
   userBeans.ts              brew/like/wishlist/rate, per-user grids, friends' ratings
   logs.ts                   diary entries, reviews, activity feed
   lists.ts follows.ts users.ts files.ts seed.ts
+  admin.ts                  setAdmin (run from the CLI or dashboard only)
   lib/                      constants (shared with the UI), validation, hydration, userBeanState
 src/
   proxy.ts                  session refresh + auth redirects
@@ -383,9 +408,12 @@ scripts/shoot.ts            headless screenshot/console-error helper (see AGENTS
   There's no way to delete an account yet.
 
 **Catalog**
-- Anyone signed in can add beans and roasters. Only the person who added a bean can
-  edit it. Roasters can't be edited or renamed, and nothing can be deleted or merged.
-  There's no moderation or admin role.
+- Anyone signed in can add beans and roasters. Only the person who added a bean, or an
+  admin, can edit it. Only admins can delete beans (see Deploying, step 5). Roasters
+  can't be edited, renamed, or deleted, even by admins, and beans can't be merged. A
+  roaster left with no beans stays listed.
+- Deleting a bean refuses beans with more than 1,000 diary entries, user states, or
+  list entries, to stay within one Convex transaction.
 - Duplicate detection only catches the same bean name from the same roaster
   (case-insensitive). "Guji Hambela" and "Guji – Hambela" are two beans.
 - Each bean stores a copy of its roaster's name (`roasterName`). Renaming a roaster
@@ -435,7 +463,7 @@ scripts/shoot.ts            headless screenshot/console-error helper (see AGENTS
 
 - [ ] Weighted rating sort (Bayesian average) and a "trending this week" section.
 - [ ] Likes and comments on reviews, plus notifications for follows, likes, and comments.
-- [ ] Moderation: admin role, report a bean or review, merge duplicate beans, edit roasters.
+- [ ] Moderation: report a bean or review, admins removing reviews, merging duplicate beans, editing roasters.
 - [ ] Rate limiting on writes (`@convex-dev/rate-limiter`), especially bean creation and uploads.
 - [ ] Clean up orphaned uploads (upload after validating, or a scheduled sweep).
 - [ ] Notes on list items, drag-and-drop reordering.

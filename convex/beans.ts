@@ -2,12 +2,14 @@ import { paginationOptsValidator } from "convex/server";
 import { ConvexError, v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { mutation, query, type MutationCtx } from "./_generated/server";
-import { requireUserId } from "./lib/auth";
+import { isAdmin, requireAdmin, requireUserId } from "./lib/auth";
 import { LIMITS, ORIGINS, PROCESSES, ROAST_LEVELS } from "./lib/constants";
 import { Loader } from "./lib/hydrate";
-import { emptyBeanAggregates } from "./lib/userBeanState";
+import { emptyBeanAggregates, updateUserBean } from "./lib/userBeanState";
 import { cleanTags, cleanText, oneOf, optionalNumber, requireText } from "./lib/validate";
 import { assertImage } from "./files";
+import { refresh as refreshList } from "./lists";
+import { removeLog } from "./logs";
 import { findOrCreateRoaster } from "./roasters";
 
 export const get = query({
@@ -239,8 +241,8 @@ export const update = mutation({
     const userId = await requireUserId(ctx);
     const bean = await ctx.db.get("beans", beanId);
     if (!bean) throw new ConvexError("That bean doesn't exist.");
-    if (bean.createdBy !== userId) {
-      throw new ConvexError("Only the person who added this bean can edit it.");
+    if (bean.createdBy !== userId && !(await isAdmin(ctx, userId))) {
+      throw new ConvexError("Only the person who added this bean, or an admin, can edit it.");
     }
     const fields = cleanBean(input);
     const roaster = await resolveRoaster(ctx, roasterArg, userId);
@@ -268,6 +270,69 @@ export const update = mutation({
       imageId: nextImage,
       searchText: searchTextFor(fields, roaster.name),
     });
+    return null;
+  },
+});
+
+/** How many diary entries, user states, and list entries one delete may clean up. */
+const DELETE_MAX = 1000;
+
+/**
+ * Delete a bean and everything that points at it, keeping every counter right:
+ * diary entries and user states go through removeLog / updateUserBean (so user
+ * stats and the bean's aggregates stay consistent until the bean is gone),
+ * list entries are removed and their lists recounted, and the roaster's bean
+ * count drops. Favorites that point at it are skipped when shown and dropped
+ * the next time their owner saves favorites.
+ */
+export async function deleteBean(ctx: MutationCtx, beanId: Id<"beans">): Promise<void> {
+  const bean = await ctx.db.get("beans", beanId);
+  if (!bean) throw new ConvexError("That bean doesn't exist.");
+
+  const [logs, userBeans, listItems] = await Promise.all([
+    ctx.db.query("logs").withIndex("by_bean_and_hasReview", (q) => q.eq("beanId", beanId)).take(DELETE_MAX + 1),
+    ctx.db.query("userBeans").withIndex("by_bean", (q) => q.eq("beanId", beanId)).take(DELETE_MAX + 1),
+    ctx.db.query("listItems").withIndex("by_bean", (q) => q.eq("beanId", beanId)).take(DELETE_MAX + 1),
+  ]);
+  if (logs.length > DELETE_MAX || userBeans.length > DELETE_MAX || listItems.length > DELETE_MAX) {
+    throw new ConvexError("This bean has too much activity to delete in one go.");
+  }
+
+  for (const log of logs) await removeLog(ctx, log.userId, log._id);
+  for (const row of userBeans) {
+    // No diary entries are left, so clearing the state is always allowed.
+    await updateUserBean(ctx, row.userId, beanId, (s) => ({
+      ...s,
+      brewed: false,
+      liked: false,
+      wishlisted: false,
+      rating: undefined,
+      brewCount: 0,
+      lastBrewedOn: undefined,
+    }));
+  }
+  const lists = new Set<Id<"lists">>();
+  for (const item of listItems) {
+    await ctx.db.delete("listItems", item._id);
+    lists.add(item.listId);
+  }
+  for (const listId of lists) await refreshList(ctx, listId);
+
+  const roaster = await ctx.db.get("roasters", bean.roasterId);
+  if (roaster) {
+    await ctx.db.patch("roasters", roaster._id, { beanCount: Math.max(0, roaster.beanCount - 1) });
+  }
+  if (bean.imageId) await ctx.storage.delete(bean.imageId);
+  await ctx.db.delete("beans", beanId);
+}
+
+/** Admins only: delete a bean, with all diary entries, ratings, and list entries for it. */
+export const remove = mutation({
+  args: { beanId: v.id("beans") },
+  returns: v.null(),
+  handler: async (ctx, { beanId }) => {
+    await requireAdmin(ctx);
+    await deleteBean(ctx, beanId);
     return null;
   },
 });

@@ -20,7 +20,8 @@ async function itemsOf(ctx: MutationCtx, listId: Id<"lists">) {
     .take(LIMITS.listItemsMax + 1);
 }
 
-async function refresh(ctx: MutationCtx, listId: Id<"lists">) {
+/** Recompute a list's bean count and preview after its items change. */
+export async function refresh(ctx: MutationCtx, listId: Id<"lists">) {
   const items = await itemsOf(ctx, listId);
   await ctx.db.patch("lists", listId, {
     beanCount: items.length,

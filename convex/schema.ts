@@ -28,6 +28,8 @@ export default defineSchema({
     location: v.optional(v.string()),
     avatarId: v.optional(v.id("_storage")),
     favoriteBeanIds: v.optional(v.array(v.id("beans"))),
+    // Admins can edit and delete any bean. Set only with `convex run admin:setAdmin`.
+    isAdmin: v.optional(v.boolean()),
     stats: userStats,
   }).index("by_followers", ["stats.followers"]),
 
@@ -93,6 +95,7 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_user_and_bean", ["userId", "beanId"])
+    .index("by_bean", ["beanId"])
     .index("by_user_and_brewed_and_updatedAt", ["userId", "brewed", "updatedAt"])
     .index("by_user_and_liked_and_updatedAt", ["userId", "liked", "updatedAt"])
     .index("by_user_and_wishlisted_and_updatedAt", [

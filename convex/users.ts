@@ -109,6 +109,7 @@ export const me = query({
       location: user.location ?? null,
       stats: user.stats,
       joinedAt: user._creationTime,
+      isAdmin: user.isAdmin === true,
       favorites: favorites.filter((b) => b !== null),
     };
   },
@@ -131,6 +132,7 @@ export const byUsername = query({
       location: user.location ?? null,
       stats: user.stats,
       joinedAt: user._creationTime,
+      isAdmin: user.isAdmin === true,
       favorites: favorites.filter((b) => b !== null),
     };
   },

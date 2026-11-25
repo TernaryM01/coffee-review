@@ -229,7 +229,7 @@ function ActionPanel({ bean, card, mine }: { bean: Bean; card: BeanCard; mine: M
       >
         <ListPlus className="size-4" /> Add to lists…
       </button>
-      {me && bean.createdBy === me._id && (
+      {me && (bean.createdBy === me._id || me.isAdmin) && (
         <Link
           href={`/beans/${bean._id}/edit`}
           className="flex w-full items-center justify-center gap-2 border-t border-line px-4 py-2.5 text-sm text-muted hover:bg-raised hover:text-ink"
